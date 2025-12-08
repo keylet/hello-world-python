@@ -41,14 +41,17 @@ resource "aws_autoscaling_group" "asg" {
   desired_capacity     = 5
   max_size             = 5
   min_size             = 5
-  launch_template {
-    launch_template_name = aws_launch_template.example.name
-  }
   vpc_zone_identifier  = [
     "subnet-00ba1d368014ff92d",  # Subnet 1
     "subnet-06ba7208dd95414f0",  # Subnet 2
     "subnet-02042689e5e175b3a"   # Subnet 3
   ]
+
+  # Uso correcto de launch_template
+  launch_template {
+    id      = aws_launch_template.example.id
+    version = "$Latest"
+  }
 }
 
 # Application Load Balancer (ALB)
