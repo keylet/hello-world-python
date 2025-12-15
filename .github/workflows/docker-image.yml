@@ -30,7 +30,6 @@ jobs:
     - name: Build and push Docker image
       run: |
         # Usamos el tag 'latest' para que el despliegue siempre sepa qué versión jalar
-        # También puedes usar github.sha y jalar esa etiqueta, pero 'latest' es simple para este caso.
         IMAGE_TAG="keylet30/hello-world-python:latest"
         docker build -t $IMAGE_TAG .
         docker push $IMAGE_TAG
@@ -82,8 +81,7 @@ jobs:
           for IP in $PUBLIC_IPS; do
             echo "--- Conectando a ec2-user@$IP ---"
             
-            # ssh -o StrictHostKeyChecking=no: Evita el prompt interactivo de SSH
-            # El usuario por defecto en Amazon Linux es 'ec2-user'
+            # El uso de 'EOF_SSH' impide la expansión de variables en el script remoto
             ssh -o StrictHostKeyChecking=no ec2-user@$IP << 'EOF_SSH'
               
               # 1. Detener y eliminar el contenedor viejo
@@ -100,5 +98,6 @@ jobs:
                 keylet30/hello-world-python:latest
                 
               echo "Despliegue completado."
-EOF_SSH
-          done
+# ...
+EOF_SSH # <--- Esta es la línea 103 (o cerca) que causó el error
+          done # <-- Esta es la palabra clave que cierra el bucle 'for'
