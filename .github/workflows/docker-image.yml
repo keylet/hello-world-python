@@ -1,11 +1,16 @@
-name: CI/CD Pipeline for Docker and Terraform
+# .github/workflows/deploy.yml
+
+name: CI/CD Pipeline for Docker
 
 on:
   push:
     branches:
-      - main  # O la rama que estés utilizando para desplegar
+      - main 
 
 jobs:
+  # ===============================================
+  # JOB 1: CONSTRUIR Y SUBIR IMAGEN A DOCKER HUB
+  # ===============================================
   build_and_push:
     runs-on: ubuntu-latest
 
@@ -13,7 +18,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
-    # Configurar Docker
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v1
 
@@ -21,40 +25,80 @@ jobs:
       uses: docker/login-action@v2
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}  # Usamos el Docker Hub Token en lugar de la contraseña
+        password: ${{ secrets.DOCKERHUB_TOKEN }} 
 
     - name: Build and push Docker image
       run: |
-        docker build -t keylet30/hello-world-python:${{ github.sha }} .
-        docker push keylet30/hello-world-python:${{ github.sha }}
-
-  terraform_deploy:
+        # Usamos el tag 'latest' para que el despliegue siempre sepa qué versión jalar
+        # También puedes usar github.sha y jalar esa etiqueta, pero 'latest' es simple para este caso.
+        IMAGE_TAG="keylet30/hello-world-python:latest"
+        docker build -t $IMAGE_TAG .
+        docker push $IMAGE_TAG
+        
+  # ===============================================
+  # JOB 2: DESPLIEGUE REMOTO SSH A INSTANCIAS EC2
+  # ===============================================
+  deploy:
+    needs: build_and_push # Se ejecuta solo si la construcción fue exitosa
     runs-on: ubuntu-latest
-    needs: build_and_push
-
+    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      # 1. Configurar el SSH Agent con la clave privada
+      - name: Configurar SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          # REQUIERE el Secret 'SSH_PRIVATE_KEY' que debes agregar.
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          
+      # 2. Configurar credenciales de AWS
+      - name: Configurar credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1 # Asegúrate que tu región sea la misma
 
-    - name: Set up AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-        aws-region: "us-east-1"  # Aquí debes especificar la región
-
-    - name: Install Terraform
-      run: |
-        curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-        sudo apt-add-repository "deb https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-        sudo apt-get update && sudo apt-get install terraform
-
-    - name: Terraform Init
-      run: terraform init
-
-    - name: Terraform Plan
-      run: terraform plan
-
-    - name: Terraform Apply
-      run: terraform apply -auto-approve
+      # 3. Obtener IPs y Desplegar via SSH
+      - name: Obtener IPs y Desplegar el Contenedor
+        run: |
+          echo "Buscando IDs de instancias en el ASG..."
+          
+          # a. Obtener los IDs de las instancias activas en el ASG (asumimos el tag 'ASG-Name' = 'asg')
+          INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "asg" \
+            --query "AutoScalingGroups[].Instances[].InstanceId" \
+            --output text)
+            
+          # b. Obtener las IPs públicas de esas instancias (solo las que están corriendo)
+          PUBLIC_IPS=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_IDS \
+            --filters "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].PublicIpAddress" \
+            --output text)
+            
+          echo "Desplegando en las IPs: $PUBLIC_IPS"
+          
+          # c. Ejecutar los comandos de Docker CORREGIDOS en cada IP via SSH
+          for IP in $PUBLIC_IPS; do
+            echo "--- Conectando a ec2-user@$IP ---"
+            
+            # ssh -o StrictHostKeyChecking=no: Evita el prompt interactivo de SSH
+            # El usuario por defecto en Amazon Linux es 'ec2-user'
+            ssh -o StrictHostKeyChecking=no ec2-user@$IP << 'EOF_SSH'
+              
+              # 1. Detener y eliminar el contenedor viejo
+              docker stop hello-world-python || true
+              docker rm hello-world-python || true
+              
+              # 2. Descargar la imagen más reciente (ya se subió al Hub)
+              docker pull keylet30/hello-world-python:latest
+              
+              # 3. EJECUTAR EL CONTENEDOR CON EL MAPEO CORREGIDO (80:5000)
+              docker run -d \
+                --name hello-world-python \
+                -p 80:5000 \
+                keylet30/hello-world-python:latest
+                
+              echo "Despliegue completado."
+EOF_SSH
+          done

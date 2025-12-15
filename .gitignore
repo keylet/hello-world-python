@@ -1,0 +1,16 @@
+# Archivos de Terraform que deben ser ignorados
+
+# Directorio de módulos y plugins de Terraform (archivos grandes)
+.terraform/
+.terraform.lock.hcl
+
+# Archivo de estado local y variables de salida
+*.tfstate
+*.tfstate.*
+
+# Archivo de plan de ejecución de Terraform
+*.tfplan
+
+# Archivos de respaldo y crash dumps
+.terraform.d/
+crash.log
