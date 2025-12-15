@@ -5,7 +5,7 @@ name: CI/CD Pipeline for Docker
 on:
   push:
     branches:
-      - main 
+      - main  # Este workflow se ejecuta al hacer push a la rama 'main'
 
 jobs:
   # ===============================================
@@ -29,7 +29,6 @@ jobs:
 
     - name: Build and push Docker image
       run: |
-        # Usamos el tag 'latest' para que el despliegue siempre sepa qué versión jalar
         IMAGE_TAG="keylet30/hello-world-python:latest"
         docker build -t $IMAGE_TAG .
         docker push $IMAGE_TAG
@@ -38,7 +37,7 @@ jobs:
   # JOB 2: DESPLIEGUE REMOTO SSH A INSTANCIAS EC2
   # ===============================================
   deploy:
-    needs: build_and_push # Se ejecuta solo si la construcción fue exitosa
+    needs: build_and_push  # Este job se ejecuta solo si la construcción fue exitosa
     runs-on: ubuntu-latest
     
     steps:
@@ -46,23 +45,22 @@ jobs:
       - name: Configurar SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          # REQUIERE el Secret 'SSH_PRIVATE_KEY' que debes agregar.
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-          
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # Requiere el Secret 'SSH_PRIVATE_KEY'
+
       # 2. Configurar credenciales de AWS
       - name: Configurar credenciales de AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1 # Asegúrate que tu región sea la misma
+          aws-region: us-east-1  # Ajusta la región según tu configuración
 
-      # 3. Obtener IPs y Desplegar via SSH
-      - name: Obtener IPs y Desplegar el Contenedor
+      # 3. Obtener IPs de instancias y desplegar el contenedor
+      - name: Obtener IPs y desplegar el contenedor
         run: |
           echo "Buscando IDs de instancias en el ASG..."
           
-          # a. Obtener los IDs de las instancias activas en el ASG (asumimos el tag 'ASG-Name' = 'asg')
+          # a. Obtener los IDs de las instancias activas en el ASG
           INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "asg" \
             --query "AutoScalingGroups[].Instances[].InstanceId" \
@@ -77,27 +75,24 @@ jobs:
             
           echo "Desplegando en las IPs: $PUBLIC_IPS"
           
-          # c. Ejecutar los comandos de Docker CORREGIDOS en cada IP via SSH
+          # c. Ejecutar los comandos de Docker en cada IP via SSH
           for IP in $PUBLIC_IPS; do
             echo "--- Conectando a ec2-user@$IP ---"
             
-            # El uso de 'EOF_SSH' impide la expansión de variables en el script remoto
             ssh -o StrictHostKeyChecking=no ec2-user@$IP << 'EOF_SSH'
-              
-              # 1. Detener y eliminar el contenedor viejo
-              docker stop hello-world-python || true
-              docker rm hello-world-python || true
-              
-              # 2. Descargar la imagen más reciente (ya se subió al Hub)
-              docker pull keylet30/hello-world-python:latest
-              
-              # 3. EJECUTAR EL CONTENEDOR CON EL MAPEO CORREGIDO (80:5000)
-              docker run -d \
-                --name hello-world-python \
-                -p 80:5000 \
-                keylet30/hello-world-python:latest
-                
-              echo "Despliegue completado."
-# ...
-EOF_SSH # <--- Esta es la línea 103 (o cerca) que causó el error
-          done # <-- Esta es la palabra clave que cierra el bucle 'for'
+               # Detener y eliminar el contenedor viejo
+               docker stop hello-world-python || true
+               docker rm hello-world-python || true
+               
+               # Descargar la imagen más reciente de Docker Hub
+               docker pull keylet30/hello-world-python:latest
+               
+               # Ejecutar el contenedor con el puerto mapeado correctamente (80:5000)
+               docker run -d \
+                 --name hello-world-python \
+                 -p 80:5000 \
+                 keylet30/hello-world-python:latest
+               
+               echo "Despliegue completado en ec2-user@$IP."
+            EOF_SSH
+          done
