@@ -3,15 +3,11 @@ name: CI/CD Pipeline for Docker
 on:
   push:
     branches:
-      - main  # Este workflow se ejecuta al hacer push a la rama 'main'
+      - main
 
 jobs:
-  # ===============================================
-  # JOB 1: CONSTRUIR Y SUBIR IMAGEN A DOCKER HUB
-  # ===============================================
   build_and_push:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -31,42 +27,33 @@ jobs:
         context: .
         push: true
         tags: keylet30/hello-world-python:latest
-        
-  # ===============================================
-  # JOB 2: DESPLIEGUE REMOTO SSH A INSTANCIAS EC2
-  # ===============================================
+
   deploy:
-    needs: build_and_push  # Este job se ejecuta solo si la construcción fue exitosa
+    needs: build_and_push
     runs-on: ubuntu-latest
-    
     steps:
-      # 1. Configurar el SSH Agent con la clave privada
       - name: Configurar SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # Requiere el Secret 'SSH_PRIVATE_KEY'
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      # 2. Configurar credenciales de AWS
       - name: Configurar credenciales de AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}  # Asegúrate de que este secreto también esté presente
-          aws-region: us-east-1  # Ajusta la región según tu configuración
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
 
-      # 3. Obtener IPs de instancias y desplegar el contenedor
       - name: Obtener IPs y desplegar el contenedor
         run: |
           echo "Buscando IDs de instancias en el ASG..."
           
-          # a. Obtener los IDs de las instancias activas en el ASG
           INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "asg" \
             --query "AutoScalingGroups[].Instances[].InstanceId" \
             --output text)
             
-          # b. Obtener las IPs públicas de esas instancias (solo las que están corriendo)
           PUBLIC_IPS=$(aws ec2 describe-instances \
             --instance-ids $INSTANCE_IDS \
             --filters "Name=instance-state-name,Values=running" \
@@ -75,25 +62,14 @@ jobs:
             
           echo "Desplegando en las IPs: $PUBLIC_IPS"
           
-          # c. Ejecutar los comandos de Docker en cada IP via SSH
           for IP in $PUBLIC_IPS; do
             echo "--- Conectando a ec2-user@$IP ---"
             
-            # Conexión SSH a las instancias EC2 y despliegue del contenedor
-            ssh -o StrictHostKeyChecking=no ec2-user@$IP << 'EOF_SSH'
-# Detener y eliminar el contenedor viejo
-docker stop hello-world-python || true
-docker rm hello-world-python || true
-
-# Descargar la imagen más reciente de Docker Hub
-docker pull keylet30/hello-world-python:latest
-
-# Ejecutar el contenedor con el puerto mapeado correctamente (80:5000)
-docker run -d \
-  --name hello-world-python \
-  -p 80:5000 \
-  keylet30/hello-world-python:latest
-
-echo "Despliegue completado en ec2-user@$IP."
-EOF_SSH
+            ssh -o StrictHostKeyChecking=no ec2-user@$IP "
+              docker stop hello-world-python || true
+              docker rm hello-world-python || true
+              docker pull keylet30/hello-world-python:latest
+              docker run -d --name hello-world-python -p 80:5000 keylet30/hello-world-python:latest
+              echo 'Despliegue completado en $IP.'
+            "
           done
