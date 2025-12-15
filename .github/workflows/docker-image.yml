@@ -53,6 +53,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}  # Asegúrate de que este secreto también esté presente
           aws-region: us-east-1  # Ajusta la región según tu configuración
 
       # 3. Obtener IPs de instancias y desplegar el contenedor
