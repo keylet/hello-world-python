@@ -5,7 +5,7 @@ name: CI/CD Pipeline for Docker
 on:
   push:
     branches:
-      - main  # Este workflow se ejecuta al hacer push a la rama 'main'
+      - main  # Este workflow se ejecuta al hacer push a la rama 'main'
 
 jobs:
   # ===============================================
@@ -37,7 +37,7 @@ jobs:
   # JOB 2: DESPLIEGUE REMOTO SSH A INSTANCIAS EC2
   # ===============================================
   deploy:
-    needs: build_and_push  # Este job se ejecuta solo si la construcción fue exitosa
+    needs: build_and_push  # Este job se ejecuta solo si la construcción fue exitosa
     runs-on: ubuntu-latest
     
     steps:
@@ -45,7 +45,7 @@ jobs:
       - name: Configurar SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # Requiere el Secret 'SSH_PRIVATE_KEY'
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # Requiere el Secret 'SSH_PRIVATE_KEY'
 
       # 2. Configurar credenciales de AWS
       - name: Configurar credenciales de AWS
@@ -53,8 +53,8 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          # Eliminamos aws-session-token ya que solo se usa con credenciales temporales (STS)
-          aws-region: us-east-1  # Ajusta la región según tu configuración
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}  # Asegúrate de que este secreto también esté presente
+          aws-region: us-east-1  # Ajusta la región según tu configuración
 
       # 3. Obtener IPs de instancias y desplegar el contenedor
       - name: Obtener IPs y desplegar el contenedor
@@ -80,17 +80,21 @@ jobs:
           for IP in $PUBLIC_IPS; do
             echo "--- Conectando a ec2-user@$IP ---"
             
-            # NOTA CLAVE: Usamos 'EOF_SSH' como marcador de inicio
+            # Asegúrate de que no haya espacios antes de EOF_SSH
             ssh -o StrictHostKeyChecking=no ec2-user@$IP << 'EOF_SSH'
-# El bloque de comandos DENTRO de las EC2 (entre las etiquetas EOF_SSH) NO DEBE TENER INDENTACIÓN.
-# Esto asegura que Bash en la máquina remota lo interprete correctamente.
-docker stop hello-world-python || true
-docker rm hello-world-python || true
-docker pull keylet30/hello-world-python:latest
-docker run -d \
-  --name hello-world-python \
-  -p 80:5000 \
-  keylet30/hello-world-python:latest
-echo "Despliegue completado en ec2-user@$IP."
-EOF_SSH # <--- ¡CRÍTICO! Esta etiqueta DEBE estar en la columna 1, SIN espacios.
+               # Detener y eliminar el contenedor viejo
+               docker stop hello-world-python || true
+               docker rm hello-world-python || true
+               
+               # Descargar la imagen más reciente de Docker Hub
+               docker pull keylet30/hello-world-python:latest
+               
+               # Ejecutar el contenedor con el puerto mapeado correctamente (80:5000)
+               docker run -d \
+                 --name hello-world-python \
+                 -p 80:5000 \
+                 keylet30/hello-world-python:latest
+               
+               echo "Despliegue completado en ec2-user@$IP."
+            EOF_SSH
           done
