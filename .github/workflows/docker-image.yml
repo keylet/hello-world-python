@@ -1,5 +1,3 @@
-# .github/workflows/deploy.yml
-
 name: CI/CD Pipeline for Docker
 
 on:
@@ -80,7 +78,7 @@ jobs:
           for IP in $PUBLIC_IPS; do
             echo "--- Conectando a ec2-user@$IP ---"
             
-            # Asegúrate de que no haya espacios antes de EOF_SSH
+            # Conexión SSH a las instancias EC2 y despliegue del contenedor
             ssh -o StrictHostKeyChecking=no ec2-user@$IP << 'EOF_SSH'
                # Detener y eliminar el contenedor viejo
                docker stop hello-world-python || true
