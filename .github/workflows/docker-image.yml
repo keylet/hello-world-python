@@ -73,7 +73,7 @@ jobs:
             --filters "Name=instance-state-name,Values=running" \
             --query "Reservations[].Instances[].PublicIpAddress" \
             --output text)
-          
+            
           echo "Desplegando en las IPs: $PUBLIC_IPS"
           
           # c. Ejecutar los comandos de Docker en cada IP via SSH
